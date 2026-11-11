@@ -122,15 +122,48 @@ def test_repair_digest_is_stable_and_short():
     assert len(repair_digest()) == 16
 
 
-def test_ocr_and_page_caches_carry_the_repair_digest():
-    """A rule change must invalidate cached lines, or the fix silently does nothing --
-    the failure the table parser and the heading vocabulary each hit once before."""
+def test_pages_cache_carries_the_repair_digest_but_ocr_does_not():
+    """The finished pages hold repaired text, so a rule change must invalidate them.
+
+    The OCR entry must *not* carry it: that entry holds what the recogniser said, which
+    no rule here can change. Fingerprinting it would throw away ~50s a page of correct
+    reading every time a rule is edited -- the cost that made iterating painful before.
+    """
     from src import config as config_module
     from src.pipeline import ocr_cache, page_cache
 
     config = config_module.load()
-    assert ocr_cache(config).fingerprint["repairs"] == repair_digest()
     assert page_cache(config).fingerprint["repairs"] == repair_digest()
+    assert "repairs" not in ocr_cache(config).fingerprint
+
+
+def test_repair_lines_fixes_line_and_its_tokens_together():
+    """S5 grounds a quote against tokens. If a token disagreed with its repaired line,
+    the value would fail to ground and be discarded as unevidenced."""
+    from src.models import Line, Token
+    from src.ocr_repair import repair_lines
+
+    raw = "Other Integrations - SOK per integration/product"
+    line = Line(line_id="p1:L001", text=raw, bbox=(0, 0, 1, 1), source="paddle_ocr",
+                conf=0.97, tokens=[Token(raw, (0, 0, 1, 1), 0.97)])
+
+    assert repair_lines([line]) == 1
+    assert "50K" in line.text and "50K" in line.tokens[0].text
+    assert line.raw_text == raw
+    assert line.repairs == ["amount_glyph: 'SOK' -> '50K'"]
+
+
+def test_repair_lines_leaves_a_correctly_read_line_untouched():
+    from src.models import Line, Token
+    from src.ocr_repair import repair_lines
+
+    raw = "Rera monthly platform fee - INR 2 Lacs"
+    line = Line(line_id="p1:L002", text=raw, bbox=(0, 0, 1, 1), source="paddle_ocr",
+                tokens=[Token(raw, (0, 0, 1, 1))])
+
+    assert repair_lines([line]) == 0
+    assert line.raw_text == "", "raw_text marks a change; nothing changed here"
+    assert line.repairs == []
 
 
 def test_repaired_line_keeps_the_original_text():

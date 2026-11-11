@@ -150,6 +150,34 @@ def repair_text(text: str, conf: float = 1.0) -> tuple[str, list[Repair], list[s
     return text, repairs, suspicions
 
 
+def repair_lines(lines) -> int:
+    """Repair a page's OCR lines in place; return how many changes were made.
+
+    Applied after the OCR cache, not before it, so the cache keeps what the recogniser
+    said and this keeps what we make of it. A line read correctly keeps an empty
+    `raw_text`, so "repaired" stays distinguishable from "right first time".
+
+    Tokens carry the same text as their line and are repaired with it: S5 grounds a quote
+    by matching it against tokens, so if the two disagreed, a repaired amount would become
+    ungroundable and be thrown away as unevidenced.
+    """
+    changed = 0
+    for line in lines:
+        fixed, repairs, suspicions = repair_text(line.text, line.conf)
+        if suspicions:
+            line.suspicions = suspicions
+        if not repairs:
+            continue
+        line.raw_text = line.text
+        line.text = fixed
+        line.repairs = [str(r) for r in repairs]
+        for token in line.tokens:
+            token_fixed, _, _ = repair_text(token.text, token.conf)
+            token.text = token_fixed
+        changed += len(repairs)
+    return changed
+
+
 def repair_digest() -> str:
     """Hash of this module's source, for the OCR and page cache fingerprints.
 

@@ -19,16 +19,15 @@ log = logging.getLogger(__name__)
 
 def ocr_cache(config: Config) -> StageCache:
     """OCR output keyed by page-image hash, fingerprinted with the settings that shaped it."""
-    from .ocr_repair import repair_digest
-
     return StageCache(config.paths.cache, "ocr", {
         "dpi": config.render.dpi, "lang": config.ocr.lang,
         "orientation": config.ocr.use_doc_orientation_classify,
         "unwarp": config.ocr.use_doc_unwarping,
         "textline_orientation": config.ocr.use_textline_orientation,
-        # Repairs are applied as the page is read, so the cached lines carry them and a
-        # rule change has to invalidate this entry the same way a setting change does.
-        "repairs": repair_digest(),
+        # Deliberately *not* fingerprinted with the repair rules. This entry holds what the
+        # recogniser said, which rules cannot change; repairs are applied downstream in
+        # `layout.build_page`. Keeping them out is what lets a rule be edited without
+        # paying ~50s a page to re-read documents the recogniser already read correctly.
     })
 
 

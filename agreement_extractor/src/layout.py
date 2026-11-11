@@ -25,6 +25,7 @@ from .config import Config
 from .inventory import is_digital
 from .models import Document, Page, SealText, SignatureEvidence
 from .ocr import OcrUnavailable, mean_confidence, read_page, read_seals
+from .ocr_repair import repair_lines
 from .render import render_document, scale_for
 from .text_layer import extract_lines, extract_tables, infer_table_from_layout
 
@@ -155,6 +156,11 @@ def build_page(pdf: Path, number: int, image: Path, width: int, height: int,
                           for s in page.seals],
                 "mean_conf": page.mean_conf,
             })
+
+    # Both routes above converge here, and this sits *outside* the OCR cache on purpose:
+    # the cache holds what the recogniser said, this decides what to make of it. A changed
+    # repair rule therefore re-runs in milliseconds instead of re-reading the page.
+    repair_lines(page.lines)
 
     if not page.lines:
         page.source = "none"

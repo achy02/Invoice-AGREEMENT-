@@ -25,7 +25,6 @@ from pathlib import Path
 
 from .config import Config
 from .models import Line, SealText, Token
-from .ocr_repair import repair_text
 
 log = logging.getLogger(__name__)
 
@@ -134,19 +133,13 @@ def read_page(image: Path | bytes, page_number: int, config: Config) -> list[Lin
     recognise = getattr(pipeline, "predict", None) or pipeline.ocr
     results = flatten(recognise(array))
 
+    # Deliberately raw. Glyph repair happens in `layout.build_page`, *after* this output
+    # has been cached, so that changing a repair rule costs a second rather than a 50s
+    # re-read of every page. See `ocr_repair` for why the rules live outside the cache.
     lines: list[Line] = []
     for text, score, bbox in results:
-        # Repair glyph confusions here, at the recogniser's output, rather than further
-        # down: the token carries the same text, so a repaired amount is what both the
-        # prompt and the grounding match see, and the two cannot disagree.
-        fixed, repairs, suspicions = repair_text(text, score)
-        lines.append(Line(line_id="", text=fixed, bbox=bbox, source="paddle_ocr",
-                          conf=score, tokens=[Token(fixed, bbox, score)],
-                          raw_text=text if repairs else "",
-                          repairs=[str(r) for r in repairs], suspicions=suspicions))
-    repaired = sum(len(line.repairs) for line in lines)
-    if repaired:
-        log.info("Page %d: repaired %d OCR misread(s)", page_number, repaired)
+        lines.append(Line(line_id="", text=text, bbox=bbox, source="paddle_ocr",
+                          conf=score, tokens=[Token(text, bbox, score)]))
 
     lines.sort(key=lambda line: (round(line.bbox[1] / 4), line.bbox[0]))
     for index, line in enumerate(lines, start=1):
