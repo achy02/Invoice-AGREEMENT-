@@ -29,6 +29,21 @@ from src import config as config_module                      # noqa: E402
 from src.validate import parse_number                        # noqa: E402
 
 GOLDEN = ROOT / "tests" / "golden_msa" / "commercials.json"
+SPLITS = ROOT / "tests" / "splits.json"
+
+
+def load_splits() -> dict[str, str]:
+    """Map each client code to "tune" or "holdout".
+
+    Reported apart because they answer different questions. The tune number says how well
+    the rules fit the documents they were written against; only the holdout number says
+    anything about the next agreement. Quoting the first as if it were the second is the
+    easiest way to overstate this pipeline, so the harness refuses to merge them.
+    """
+    if not SPLITS.is_file():
+        return {}
+    data = json.loads(SPLITS.read_text(encoding="utf-8")).get("msa", {})
+    return {code: split for split in ("tune", "holdout") for code in data.get(split, [])}
 
 
 def normalise(text) -> str:
@@ -99,7 +114,8 @@ def show(result: dict, detail: bool = True) -> None:
     total = len(result["wanted"])
     if not total:
         return
-    print(f"\n{' ' + result['code'] + ' ':=^78}")
+    label = result["code"] + (f" [{result['split']}]" if result.get("split") else "")
+    print(f"\n{' ' + label + ' ':=^78}")
     print(f"  golden lines : {total:>3}      produced : {result['produced']}")
     print(f"  matched      : {len(result['found']):>3}/{total}  ({len(result['found'])/total:.0%})")
     print(f"  amount right : {len(result['right']):>3}/{total}  ({len(result['right'])/total:.0%})")
@@ -141,11 +157,17 @@ def main(argv: list[str]) -> int:
     truth = json.loads(GOLDEN.read_text(encoding="utf-8"))
     produced = json.loads(path.read_text(encoding="utf-8"))
     wanted_codes = [a.upper() for a in argv] or list(truth["files"])
+    splits = load_splits()
 
-    totals = {"wanted": 0, "found": 0, "right": 0, "page": 0, "invented": 0, "produced": 0}
+    def blank() -> dict:
+        return {"wanted": 0, "found": 0, "right": 0, "page": 0, "invented": 0, "produced": 0}
+
+    by_split: dict[str, dict] = {"tune": blank(), "holdout": blank(), "unassigned": blank()}
+    totals = blank()
     for code in truth["files"]:
         if code not in wanted_codes:
             continue
+        split = splits.get(code, "unassigned")
         marker = normalise(truth["files"][code])
         mine = [r for r in produced if marker in normalise(r.get("file"))]
         rows = [g for g in truth["charges"] if g["c"] == code]
@@ -153,23 +175,40 @@ def main(argv: list[str]) -> int:
             print(f"\n{' ' + code + ' ':=^78}")
             print(f"  nothing extracted -- is {truth['files'][code]!r} in tests/golden_msa?")
             totals["wanted"] += len(rows)
+            by_split[split]["wanted"] += len(rows)
             continue
         result = score(code, mine, rows)
+        result["split"] = split
         show(result)
-        totals["wanted"] += len(rows)
-        totals["found"] += len(result["found"])
-        totals["right"] += len(result["right"])
-        totals["page"] += len(result["right_page"])
-        totals["invented"] += len(result["invented"])
-        totals["produced"] += result["produced"]
+        for bucket in (totals, by_split[split]):
+            bucket["wanted"] += len(rows)
+            bucket["found"] += len(result["found"])
+            bucket["right"] += len(result["right"])
+            bucket["page"] += len(result["right_page"])
+            bucket["invented"] += len(result["invented"])
+            bucket["produced"] += result["produced"]
 
-    n = max(totals["wanted"], 1)
-    print(f"\n{' ALL DOCUMENTS ':=^78}")
-    print(f"  golden lines : {totals['wanted']:>3}      produced : {totals['produced']}")
-    print(f"  matched      : {totals['found']:>3}/{totals['wanted']}  ({totals['found']/n:.1%})")
-    print(f"  amount right : {totals['right']:>3}/{totals['wanted']}  ({totals['right']/n:.1%})")
-    print(f"  page right   : {totals['page']:>3}/{totals['wanted']}  ({totals['page']/n:.1%})")
-    print(f"  invented     : {totals['invented']:>3}")
+    def report(title: str, bucket: dict) -> None:
+        n = max(bucket["wanted"], 1)
+        print(f"\n{' ' + title + ' ':=^78}")
+        print(f"  golden lines : {bucket['wanted']:>3}      produced : {bucket['produced']}")
+        print(f"  matched      : {bucket['found']:>3}/{bucket['wanted']}  ({bucket['found']/n:.1%})")
+        print(f"  amount right : {bucket['right']:>3}/{bucket['wanted']}  ({bucket['right']/n:.1%})")
+        print(f"  page right   : {bucket['page']:>3}/{bucket['wanted']}  ({bucket['page']/n:.1%})")
+        print(f"  invented     : {bucket['invented']:>3}      (document states no amount)")
+
+    for name, title in (("tune", "TUNE SPLIT (rules were written against these)"),
+                        ("holdout", "HOLDOUT SPLIT (the number that predicts new paper)"),
+                        ("unassigned", "UNASSIGNED (not named in tests/splits.json)")):
+        if by_split[name]["wanted"]:
+            report(title, by_split[name])
+
+    report("ALL DOCUMENTS", totals)
+    if by_split["tune"]["wanted"] and by_split["holdout"]["wanted"]:
+        tune_rate = by_split["tune"]["right"] / max(by_split["tune"]["wanted"], 1)
+        held_rate = by_split["holdout"]["right"] / max(by_split["holdout"]["wanted"], 1)
+        print(f"\n  tune {tune_rate:.1%} vs holdout {held_rate:.1%} -- a gap here is how far "
+              f"the\n  headline number overstates performance on an unseen agreement.")
     return 0
 
 

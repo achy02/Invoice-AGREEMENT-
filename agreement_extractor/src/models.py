@@ -65,6 +65,14 @@ class Line:
     source: Source
     conf: float = 1.0
     tokens: list[Token] = field(default_factory=list)
+    #: What the recogniser actually returned, when `text` has been repaired since.
+    #: Empty when nothing was changed, so "repaired" is always distinguishable from "read
+    #: correctly first time". `ocr_repair` explains why the original is kept.
+    raw_text: str = ""
+    #: One entry per applied repair, formatted "rule: 'before' -> 'after'".
+    repairs: list[str] = field(default_factory=list)
+    #: Things a reviewer should look at, which were deliberately *not* repaired.
+    suspicions: list[str] = field(default_factory=list)
 
 
 @dataclass

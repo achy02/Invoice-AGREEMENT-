@@ -1,0 +1,25 @@
+{
+  "_why": [
+    "Accuracy measured on documents the prompts were tuned against is a training-set",
+    "number, and reads higher than the pipeline will score on new paper. This file names",
+    "which documents are which, so every report has to say which kind of number it is.",
+    "",
+    "Honest caveat, recorded rather than hidden: all eight documents here have already",
+    "been run and measured, and the commercial-heading vocabulary in layout.py was written",
+    "while looking at ABFL. So 'holdout' below means 'frozen from today', not 'never seen'.",
+    "A genuinely clean number needs agreements that have never been through this pipeline;",
+    "until then the holdout figure is an upper bound, not an unbiased estimate.",
+    "",
+    "Rule from here on: no prompt, heading pattern or repair rule may be changed in",
+    "response to a holdout failure. Diagnose on the tune split, then re-measure."
+  ],
+  "frozen_on": "2026-11-11",
+  "msa": {
+    "tune": ["ABFL", "NINJ"],
+    "holdout": ["JSGF", "AAR8"]
+  },
+  "offer_letters": {
+    "tune": ["alsd", "bajaj"],
+    "holdout": ["capitalneed", "ninjamonk"]
+  }
+}

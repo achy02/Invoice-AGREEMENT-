@@ -19,11 +19,16 @@ log = logging.getLogger(__name__)
 
 def ocr_cache(config: Config) -> StageCache:
     """OCR output keyed by page-image hash, fingerprinted with the settings that shaped it."""
+    from .ocr_repair import repair_digest
+
     return StageCache(config.paths.cache, "ocr", {
         "dpi": config.render.dpi, "lang": config.ocr.lang,
         "orientation": config.ocr.use_doc_orientation_classify,
         "unwarp": config.ocr.use_doc_unwarping,
         "textline_orientation": config.ocr.use_textline_orientation,
+        # Repairs are applied as the page is read, so the cached lines carry them and a
+        # rule change has to invalidate this entry the same way a setting change does.
+        "repairs": repair_digest(),
     })
 
 
@@ -76,7 +81,17 @@ def page_cache(config: Config) -> StageCache:
         # Which pages get a table depends on this too, so a change to the heading
         # vocabulary has to invalidate the finished pages the same way a parser fix does.
         "headings": _heading_digest(),
+        # Finished pages embed the repaired OCR lines, so this entry has to know about
+        # the repair rules as well -- it is the outermost cache and owns everything below.
+        "repairs": _repair_digest(),
     })
+
+
+def _repair_digest() -> str:
+    """A hash of the OCR repair rules, for the caches that hold repaired text."""
+    from .ocr_repair import repair_digest
+
+    return repair_digest()
 
 
 def _heading_digest() -> str:
