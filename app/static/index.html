@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Invoice PDF to Excel</title>
+<style>
+  :root { --border:#d0d7de; --muted:#57606a; --accent:#0969da; --bg:#f6f8fa; --warn:#9a6700; --err:#cf222e; --ok:#1a7f37; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; color:#1f2328; background:#fff; }
+  header { padding: 14px 24px; border-bottom: 1px solid var(--border); background: var(--bg); }
+  header h1 { margin: 0; font-size: 20px; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  main { padding: 16px 24px 48px; max-width: 1500px; }
+  section { margin-bottom: 28px; }
+  h2 { font-size: 16px; margin: 0 0 10px; }
+  h2 .step { display:inline-block; width:22px; height:22px; line-height:22px; text-align:center; border-radius:50%;
+             background: var(--accent); color:#fff; font-size:12px; margin-right:6px; }
+  #drop { border: 2px dashed var(--border); border-radius: 8px; padding: 28px; text-align: center; color: var(--muted);
+          cursor: pointer; }
+  #drop.over { border-color: var(--accent); background: #ddf4ff; }
+  button { font: inherit; padding: 7px 14px; border-radius: 6px; border: 1px solid var(--border); background: #fff; cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  .sev-ERROR, .sev-WARNING { font-size: 11px; font-weight: 600; letter-spacing: .02em; }
+  .sev-ERROR { color: #a40e26; }
+  .sev-WARNING { color: #9a6700; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap: wrap; margin-top: 10px; }
+  .scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border-bottom: 1px solid var(--border); padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: var(--bg); white-space: nowrap; position: sticky; top: 0; }
+  td.num { text-align: right; white-space: nowrap; }
+  td.pre { white-space: pre-line; min-width: 180px; max-width: 320px; }
+  tr.clickable { cursor: pointer; }
+  tr.clickable:hover { background: #f3f8ff; }
+  tr.selected { background: #ddf4ff; }
+  .badge { display:inline-block; padding: 1px 7px; border-radius: 10px; font-size: 12px; white-space: nowrap; border:1px solid; }
+  .s-PROCESSED, .s-PASSED, .s-COMPLETE { color: var(--ok); border-color: var(--ok); }
+  .s-PROCESSED_WITH_WARNINGS, .s-WARNINGS, .s-PARTIAL, .s-DUPLICATE, .s-WARNING { color: var(--warn); border-color: var(--warn); }
+  .s-FAILED, .s-REJECTED, .s-SCANNED_OR_UNREADABLE_NO_OCR, .s-ERRORS, .s-ERROR, .s-PARTIAL_UNREADABLE_PAGES { color: var(--err); border-color: var(--err); }
+  .s-QUEUED, .s-PROCESSING, .s-INFO { color: var(--muted); border-color: var(--muted); }
+  .muted { color: var(--muted); font-size: 13px; }
+  .msg { color: var(--muted); font-size: 12px; }
+  #review { border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  label { display:block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+  label.req::after { content: " *"; color: var(--accent); }
+  input, textarea { width: 100%; font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; }
+  textarea { min-height: 84px; resize: vertical; }
+  .wide { grid-column: 1 / -1; }
+  .section-head { font-size: 13px; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border);
+                  padding-bottom: 4px; margin-top: 4px; }
+  #line-nav button { min-width: 34px; padding: 4px 8px; }
+  ul.issues { margin: 8px 0 0; padding-left: 18px; font-size: 13px; }
+  ul.issues li { margin-bottom: 4px; }
+  .error { color: var(--err); font-size: 13px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Invoice PDF to Excel</h1>
+  <p>Text-based PDFs only: no OCR. Scanned pages are flagged, not guessed.</p>
+</header>
+<main>
+
+<section id="upload-section">
+  <h2><span class="step">1</span>Upload PDF invoices</h2>
+  <div id="drop">Drag and drop PDF invoices <strong>or whole folders</strong> here<br>
+    <span class="muted">Folders are scanned right through, including sub-folders</span><br>
+    <span class="muted" id="limits"></span></div>
+  <input type="file" id="file-input" accept="application/pdf,.pdf" multiple class="hidden">
+  <input type="file" id="folder-input" webkitdirectory directory multiple class="hidden">
+  <div class="row">
+    <button id="pick-files-btn">Choose files</button>
+    <button id="pick-folder-btn">Choose folder</button>
+    <button id="clear-btn" disabled>Clear</button>
+    <button id="process-btn" class="primary" disabled>Process files</button>
+  </div>
+  <div class="row"><span id="selected" class="muted">No files selected</span></div>
+  <div id="upload-error" class="error"></div>
+</section>
+
+<section id="status-section" class="hidden">
+  <h2><span class="step">2</span>Processing status</h2>
+  <p id="progress" class="muted"></p>
+  <div class="scroll"><table id="status-table">
+    <thead><tr><th>File</th><th>Pages</th><th>Status</th><th>Details</th></tr></thead><tbody></tbody>
+  </table></div>
+</section>
+
+<section id="data-section" class="hidden">
+  <h2><span class="step">3</span>Extracted invoice data</h2>
+  <p class="muted" id="data-count">Click a row to review and correct it.</p>
+  <div class="scroll" style="max-height: 520px;"><table id="data-table"><thead></thead><tbody></tbody></table></div>
+</section>
+
+<section id="review-section" class="hidden">
+  <h2><span class="step">4</span>Review and correct</h2>
+  <div id="review">
+    <div class="row" style="margin-top:0; justify-content: space-between;">
+      <strong id="review-title"></strong>
+      <span id="review-status"></span>
+    </div>
+    <div class="row" id="line-nav"></div>
+    <div class="grid" id="review-form" style="margin-top: 12px;"></div>
+    <div class="row">
+      <button id="save-btn" class="primary">Save corrections</button>
+      <button id="cancel-btn">Close</button>
+      <span id="save-msg" class="muted"></span>
+    </div>
+    <h3 style="font-size:14px; margin: 16px 0 0;">Issues</h3>
+    <ul class="issues" id="review-issues"></ul>
+  </div>
+</section>
+
+<section id="download-section" class="hidden">
+  <h2><span class="step">5</span>Download Excel</h2>
+  <p class="muted">The workbook includes your corrections, plus the Processing Summary and Extraction Exceptions sheets.</p>
+  <button id="download-btn" class="primary">Download Excel workbook</button>
+  <span id="download-msg" class="muted"></span>
+</section>
+
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let cfg = null, selectedFiles = [], batch = null, pollTimer = null, reviewing = null;
+
+const TEXTAREA_COLS = new Set(["Bill To", "Ship To", "Description of Services"]);
+const DATE_COLS = new Set(["Transaction Date From", "Transaction Date To", "Invoice Date"]);
+const TABLE_LEAD = ["SR No"];
+const TABLE_EXTRA = ["HSN / SAC", "Count of Transaction", "Rate Per Unit", "Line Total Amount",
+                     "Source File Name", "Extraction Status", "Validation Status", "Review Required"];
+
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function badge(s) { return `<span class="badge s-${esc(s)}">${esc(String(s).replaceAll("_", " "))}</span>`; }
+function fmtAmount(v) { return v == null ? "" : Number(v).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
+function fmtDate(v) { if (!v) return ""; const [y, m, d] = v.split("-"); return `${d}-${m}-${y}`; }
+
+async function loadConfig() {
+  cfg = await (await fetch("/api/config")).json();
+  $("limits").textContent = `Up to ${cfg.max_files} PDFs per batch, ${cfg.max_file_size_mb} MB each`;
+}
+
+const PDF_RE = /\.pdf$/i;
+let skippedCount = 0;
+
+// Where a file came from inside a dropped/chosen folder, e.g. "2025/April/inv.pdf".
+function pathOf(file) { return file._path || file.webkitRelativePath || file.name; }
+
+function setFiles(list) {
+  selectedFiles = selectedFiles.concat(Array.from(list));
+  // Identical paths added twice (folder chosen again) are collapsed.
+  const seen = new Set();
+  selectedFiles = selectedFiles.filter(f => !seen.has(pathOf(f)) && seen.add(pathOf(f)));
+  const folders = new Set(selectedFiles.map(f => {
+    const p = pathOf(f); const i = p.lastIndexOf("/"); return i < 0 ? "" : p.slice(0, i);
+  }));
+  let text = "No files selected";
+  if (selectedFiles.length) {
+    text = `${selectedFiles.length} PDF(s) selected`;
+    if (folders.size > 1 || (folders.size === 1 && !folders.has(""))) text += ` from ${folders.size} folder(s)`;
+    if (skippedCount) text += ` — ${skippedCount} non-PDF file(s) skipped`;
+  }
+  $("selected").textContent = text;
+  $("process-btn").disabled = $("clear-btn").disabled = selectedFiles.length === 0;
+  $("upload-error").textContent = "";
+  if (cfg && selectedFiles.length > cfg.max_files) {
+    $("upload-error").textContent =
+      `${selectedFiles.length} files selected but the limit is ${cfg.max_files} per batch. ` +
+      `Upload fewer, or raise INVOICE_MAX_FILES_PER_BATCH in .env and restart the server.`;
+  }
+}
+
+function keepPdfs(files) {
+  const pdfs = [];
+  for (const f of files) { if (PDF_RE.test(f.name)) pdfs.push(f); else skippedCount++; }
+  return pdfs;
+}
+
+// Walk a dropped entry; directories are read right through, including sub-folders.
+async function collectEntry(entry, prefix, out) {
+  if (entry.isFile) {
+    const file = await new Promise((res, rej) => entry.file(res, rej));
+    if (PDF_RE.test(file.name)) { file._path = prefix + file.name; out.push(file); }
+    else skippedCount++;
+    return;
+  }
+  if (!entry.isDirectory) return;
+  const reader = entry.createReader();
+  for (;;) {
+    // readEntries returns at most 100 per call, so keep reading until it comes back empty.
+    const entries = await new Promise((res, rej) => reader.readEntries(res, rej));
+    if (!entries.length) break;
+    for (const e of entries) await collectEntry(e, prefix + entry.name + "/", out);
+  }
+}
+
+const drop = $("drop");
+drop.addEventListener("click", () => $("file-input").click());
+$("pick-files-btn").addEventListener("click", () => $("file-input").click());
+$("pick-folder-btn").addEventListener("click", () => $("folder-input").click());
+$("file-input").addEventListener("change", e => {
+  skippedCount = 0; setFiles(keepPdfs(e.target.files)); e.target.value = "";
+});
+$("folder-input").addEventListener("change", e => {
+  skippedCount = 0; setFiles(keepPdfs(e.target.files)); e.target.value = "";
+});
+["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", async e => {
+  e.preventDefault();
+  drop.classList.remove("over");
+  skippedCount = 0;
+  // webkitGetAsEntry must be called before any await: the item list empties when the handler returns.
+  const entries = Array.from(e.dataTransfer.items || [])
+    .map(i => (i.webkitGetAsEntry ? i.webkitGetAsEntry() : null)).filter(Boolean);
+  if (!entries.length) { setFiles(keepPdfs(e.dataTransfer.files)); return; }
+  $("selected").textContent = "Scanning folders...";
+  const out = [];
+  for (const entry of entries) await collectEntry(entry, "", out);
+  setFiles(out);
+});
+$("clear-btn").addEventListener("click", () => { selectedFiles = []; skippedCount = 0; setFiles([]); });
+
+$("process-btn").addEventListener("click", async () => {
+  if (cfg && selectedFiles.length > cfg.max_files) {
+    $("upload-error").textContent = `Too many files: the limit is ${cfg.max_files} per batch.`;
+    return;
+  }
+  const form = new FormData();
+  // The third argument keeps the sub-folder path as the uploaded file's name.
+  selectedFiles.forEach(f => form.append("files", f, pathOf(f)));
+  $("process-btn").disabled = true;
+  $("upload-error").textContent = "";
+  try {
+    const resp = await fetch("/api/batches", {method: "POST", body: form});
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || resp.statusText);
+    batch = data;
+    selectedFiles = []; setFiles([]);
+    closeReview();
+    render();
+    poll();
+  } catch (err) {
+    $("upload-error").textContent = "Upload failed: " + err.message;
+    $("process-btn").disabled = false;
+  }
+});
+
+function poll() {
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(async () => {
+    const resp = await fetch(`/api/batches/${batch.batch_id}`);
+    if (resp.ok) { batch = await resp.json(); render(); }
+    if (!batch.complete) poll();
+  }, 800);
+}
+
+// Why a file is flagged: its own messages, then the issues that make it need review.
+// Without this a PROCESSED_WITH_WARNINGS row gives no clue what the warning was.
+function details(f) {
+  const parts = f.messages.map(esc);
+  if (f.record) {
+    const issues = f.record.issues.filter(i => i.severity !== "INFO");
+    parts.push(...issues.map(i =>
+      `<span class="sev-${esc(i.severity)}">${esc(i.severity)}</span> ${esc(i.field)}: ${esc(i.description)}`));
+  }
+  return parts.length ? parts.join("<br>") : "";
+}
+
+function render() {
+  $("status-section").classList.remove("hidden");
+  const files = batch.files;
+  const done = files.filter(f => !["QUEUED", "PROCESSING"].includes(f.status)).length;
+  $("progress").textContent = batch.complete
+    ? `Finished: ${files.length} file(s). ${files.filter(f => f.record).length} invoice record(s) extracted, ` +
+      `${files.filter(f => f.record && f.record.review_required).length} need review.`
+    : `Processing... ${done} of ${files.length} file(s) done`;
+  $("status-table").querySelector("tbody").innerHTML = files.map(f => `
+    <tr><td>${esc(f.file_name)}</td><td>${f.page_count ?? ""}</td><td>${badge(f.status)}</td>
+    <td class="msg">${details(f)}</td></tr>`).join("");
+
+  const records = files.filter(f => f.record);
+  $("data-section").classList.toggle("hidden", !batch.complete || records.length === 0);
+  $("download-section").classList.toggle("hidden", !batch.complete);
+  if (!batch.complete) return;
+  const cols = TABLE_LEAD.concat(cfg.required_columns, TABLE_EXTRA);
+  const amounts = new Set(cfg.amount_columns);
+  const totalLines = records.reduce((n, f) => n + f.record.lines.length, 0);
+  $("data-count").textContent =
+    `${totalLines} service line row(s) from ${records.length} invoice(s). Click a row to review and correct it.`;
+  $("data-table").querySelector("thead").innerHTML = "<tr>" + cols.map(c => `<th>${esc(c)}</th>`).join("") + "</tr>";
+  $("data-table").querySelector("tbody").innerHTML = records.map(f => f.record.lines.map((v, li) => {
+    const counts = new Set(cfg.quantity_columns || []);
+    const cells = cols.map(c => {
+      const val = v[c];
+      if (counts.has(c)) return `<td>${val == null ? "" : esc(String(Number(val)))}</td>`;
+      if (amounts.has(c)) return `<td class="num">${fmtAmount(val)}</td>`;
+      if (DATE_COLS.has(c)) return `<td>${fmtDate(val)}</td>`;
+      if (["Extraction Status", "Validation Status"].includes(c)) return `<td>${val ? badge(val) : ""}</td>`;
+      if (c === "Review Required") return `<td>${val === "Yes" ? badge("WARNING").replace("WARNING", "Yes") : "No"}</td>`;
+      return `<td class="${TEXTAREA_COLS.has(c) ? "pre" : ""}">${esc(val)}</td>`;
+    }).join("");
+    const selected = reviewing && reviewing.file === f.file_id && reviewing.line === li;
+    const first = li === 0 ? ' style="border-top:2px solid var(--border)"' : "";
+    return `<tr class="clickable ${selected ? "selected" : ""}" data-id="${f.file_id}" data-line="${li}"${first}>${cells}</tr>`;
+  }).join("")).join("");
+  document.querySelectorAll("#data-table tbody tr").forEach(tr =>
+    tr.addEventListener("click", () => openReview(Number(tr.dataset.id), Number(tr.dataset.line))));
+}
+
+function field(col, value, index) {
+  const req = cfg.required_columns.includes(col) ? "req" : "";
+  const id = `fld-${index}`;
+  const val = value ?? "";
+  let input;
+  if (TEXTAREA_COLS.has(col)) input = `<textarea id="${id}" data-col="${esc(col)}">${esc(val)}</textarea>`;
+  else if (DATE_COLS.has(col)) input = `<input type="date" id="${id}" data-col="${esc(col)}" value="${esc(val)}">`;
+  else input = `<input type="text" id="${id}" data-col="${esc(col)}" value="${esc(val)}">`;
+  return `<div class="${TEXTAREA_COLS.has(col) ? "wide" : ""}"><label class="${req}" for="${id}">${esc(col)}</label>${input}</div>`;
+}
+
+function openReview(fileId, lineIndex) {
+  reviewing = {file: fileId, line: lineIndex || 0};
+  const f = batch.files.find(x => x.file_id === fileId);
+  const v = f.record.lines[reviewing.line];
+  const lineCols = new Set(cfg.line_columns);
+  $("review-section").classList.remove("hidden");
+  $("review-title").textContent = f.file_name;
+  $("review-status").innerHTML =
+    (f.record.lines.length > 1
+      ? `<span class="muted">Service line ${reviewing.line + 1} of ${f.record.lines.length}</span> `
+      : "") + badge(v["Validation Status"]);
+  $("save-msg").textContent = "";
+  let index = 0;
+  const section = (title, cols) =>
+    `<div class="wide section-head">${title}</div>` + cols.map(c => field(c, v[c], index++)).join("");
+  $("review-form").innerHTML =
+    section(f.record.lines.length > 1 ? `This service line (${reviewing.line + 1} of ${f.record.lines.length})`
+                                      : "Service line",
+            cfg.editable_columns.filter(c => lineCols.has(c))) +
+    section("Invoice (shared by every service line)", cfg.editable_columns.filter(c => !lineCols.has(c)));
+  $("line-nav").innerHTML = f.record.lines.length > 1
+    ? f.record.lines.map((l, i) =>
+        `<button class="${i === reviewing.line ? "primary" : ""}" data-goto="${i}">${esc(l["SR No"] || i + 1)}</button>`).join("")
+    : "";
+  document.querySelectorAll("#line-nav [data-goto]").forEach(b =>
+    b.addEventListener("click", () => openReview(fileId, Number(b.dataset.goto))));
+  const issues = f.record.issues;
+  $("review-issues").innerHTML = issues.length
+    ? issues.map(i => `<li>${badge(i.severity)} <strong>${esc(i.field)}</strong>${i.page ? ` (page ${i.page})` : ""}: ${esc(i.description)}` +
+        `${i.suggested_action ? ` <span class="muted">Action: ${esc(i.suggested_action)}</span>` : ""}</li>`).join("")
+    : "<li>No issues.</li>";
+  render();
+  $("review-section").scrollIntoView({behavior: "smooth", block: "start"});
+}
+
+function closeReview() { reviewing = null; $("review-section").classList.add("hidden"); }
+$("cancel-btn").addEventListener("click", () => { closeReview(); render(); });
+
+$("save-btn").addEventListener("click", async () => {
+  const f = batch.files.find(x => x.file_id === reviewing.file);
+  const current = f.record.lines[reviewing.line];
+  const changes = {};
+  document.querySelectorAll("#review-form [data-col]").forEach(el => {
+    const col = el.dataset.col;
+    const before = current[col] ?? "";
+    if (String(el.value) !== String(before)) changes[col] = el.value;
+  });
+  if (Object.keys(changes).length === 0) { $("save-msg").textContent = "No changes."; return; }
+  const resp = await fetch(`/api/batches/${batch.batch_id}/records/${reviewing.file}?line=${reviewing.line}`, {
+    method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(changes)});
+  const data = await resp.json();
+  if (!resp.ok) { $("save-msg").innerHTML = `<span class="error">${esc(data.detail)}</span>`; return; }
+  batch.files = batch.files.map(x => x.file_id === data.file_id ? data : x);
+  openReview(reviewing.file, reviewing.line);
+  $("save-msg").textContent = "Saved. Validation re-run.";
+});
+
+$("download-btn").addEventListener("click", async () => {
+  $("download-msg").textContent = "Generating...";
+  const resp = await fetch(`/api/batches/${batch.batch_id}/excel`);
+  if (!resp.ok) { $("download-msg").textContent = "Failed: " + (await resp.json()).detail; return; }
+  const blob = await resp.blob();
+  const name = (resp.headers.get("content-disposition") || "").match(/filename="?([^";]+)"?/)?.[1] || "Invoice_Extraction.xlsx";
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  URL.revokeObjectURL(a.href);
+  $("download-msg").textContent = `Downloaded ${name}`;
+});
+
+loadConfig();
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+[
+  {
+    "name": "Example vendor with unusual labels",
+    "match": {
+      "gstin": "07AAACU9999Q1Z1",
+      "text_contains": "Umbrella Logistics"
+    },
+    "labels": {
+      "invoice_no": ["Bill Ref"],
+      "total": ["Net Receivable"],
+      "taxable": ["Freight Value"]
+    }
+  }
+]

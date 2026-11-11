@@ -1,0 +1,30 @@
+# OCR dependencies for the agreement pipeline (Python 3.13 only).
+#
+#   py -3.13 -m venv .venv313
+#   .venv313\Scripts\pip install -r requirements.txt -r requirements-ocr.txt
+#
+# Two things on Windows are easy to lose a day to, so they are recorded here:
+#
+# 1. PaddlePaddle needs VCOMP140.DLL, the MSVC OpenMP runtime. It is NOT part of a stock
+#    Windows install and is NOT bundled in the wheel; without it `import paddle` fails with
+#    "DLL load failed while importing libpaddle: The specified module could not be found",
+#    which names no missing file. Install it with:
+#
+#       winget install --id Microsoft.VCRedist.2015+.x64
+#
+# 2. pymupdf 2.0 segfaults on import under Python 3.13 (exit code -1073741819, an access
+#    violation, with no traceback). 1.28.2 is pinned below and in requirements.txt.
+
+paddlepaddle==3.3.1
+paddleocr>=3.0
+pillow>=11.0
+numpy>=2.0
+
+# Pinned because 2.0 crashes the interpreter on 3.13; see note 2 above.
+pymupdf==1.28.2
+
+# The viewer (scripts/serve.py). Listed here rather than relied on from the invoice app's
+# requirements, so this folder still installs and runs on its own after that app is gone.
+fastapi>=0.110
+uvicorn>=0.27
+python-multipart>=0.0.9

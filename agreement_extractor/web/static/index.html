@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agreement extraction</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --ink: #1d2430; --muted: #6b7684;
+    --line: #dde1e7; --accent: #1f3864; --ok: #1a7f4b; --warn: #a76a00; --bad: #b3261e;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
+         background: var(--bg); color: var(--ink); }
+  header { background: var(--accent); color: #fff; padding: 14px 20px;
+           display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; font-weight: 600; }
+  header .sub { color: #c9d4e8; font-size: 12.5px; }
+  .health { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+  .pill { font-size: 12px; padding: 3px 10px; border-radius: 11px;
+          background: rgba(255,255,255,.15); }
+  .pill.ok { background: #1a7f4b; } .pill.bad { background: #b3261e; }
+
+  main { padding: 18px 20px 60px; max-width: 1280px; margin: 0 auto; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+          padding: 16px; margin-bottom: 16px; }
+  .card h2 { font-size: 14px; margin: 0 0 10px; text-transform: uppercase;
+             letter-spacing: .05em; color: var(--muted); }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button { font: inherit; padding: 7px 14px; border-radius: 6px; cursor: pointer;
+           border: 1px solid var(--accent); background: var(--accent); color: #fff; }
+  button.ghost { background: #fff; color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  input[type=file] { font: inherit; }
+
+  .status { margin-top: 10px; font-size: 13px; color: var(--muted); }
+  .status.err { color: var(--bad); }
+  .bar { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden;
+         margin-top: 8px; }
+  .bar i { display: block; height: 100%; width: 36%; background: var(--accent);
+           animation: slide 1.3s ease-in-out infinite; }
+  @keyframes slide { 0% { margin-left: -36%; } 100% { margin-left: 100%; } }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 9px; border-bottom: 1px solid var(--line);
+           vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  #docs tbody tr { cursor: pointer; }
+  #docs tbody tr:hover { background: #eef2f9; }
+  #docs tbody tr.sel { background: #e2ebfa; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .tag { font-size: 11px; padding: 1px 7px; border-radius: 9px; background: #eef0f4;
+         color: var(--muted); white-space: nowrap; }
+  .tag.ocr  { background: #fde9cc; color: #7a4a00; }
+  .tag.text { background: #d8ece0; color: #0f5c38; }
+  .tag.none { background: #f6d5d2; color: #8c1d16; }
+  .tag.ok   { background: #d8ece0; color: #0f5c38; }
+  .tag.bad  { background: #f6d5d2; color: #8c1d16; }
+  .tag.warn { background: #fde9cc; color: #7a4a00; }
+
+  .tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
+  .tabs button { background: none; border: none; color: var(--muted); border-radius: 0;
+                 border-bottom: 2px solid transparent; padding: 8px 14px; }
+  .tabs button.on { color: var(--accent); border-bottom-color: var(--accent);
+                    font-weight: 600; }
+  .empty { color: var(--muted); padding: 22px 4px; }
+  .quote { color: var(--muted); font-style: italic; }
+  h3 { font-size: 13px; margin: 18px 0 6px; color: var(--muted);
+       text-transform: uppercase; letter-spacing: .04em; }
+  h3:first-child { margin-top: 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Agreement extraction</h1>
+  <span class="sub">PaddleOCR reads the pages &middot; Qwen3 maps them to fields &middot; out comes a workbook</span>
+  <div class="health" id="health"></div>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Run a document</h2>
+    <div class="row">
+      <input type="file" id="files" accept="application/pdf" multiple>
+      <button id="go">Upload &amp; run</button>
+      <span style="color:var(--muted)">or</span>
+      <button class="ghost" id="goGolden">Run the 4 golden offer letters</button>
+      <button class="ghost" id="goSamples">Run the sample agreements</button>
+    </div>
+    <div class="status" id="status">Pick a PDF, or run a folder that is already on disk.</div>
+    <div class="bar" id="bar" hidden><i></i></div>
+  </section>
+
+  <section class="card" id="docsCard" hidden>
+    <h2>Documents in this run</h2>
+    <table id="docs"><thead><tr>
+      <th>File</th><th>Pages</th><th>Read by</th><th>OCR conf.</th>
+      <th>Fields</th><th>Charges</th><th>Signed</th><th>Flags</th>
+    </tr></thead><tbody></tbody></table>
+    <div class="row" style="margin-top:12px">
+      <button id="xlsx" disabled>Download the workbook</button>
+      <span class="status" style="margin:0">The workbook is the output. Everything below is a preview of it.</span>
+    </div>
+  </section>
+
+  <section id="detail" hidden>
+    <div class="tabs">
+      <button data-tab="values" class="on">What was extracted</button>
+      <button data-tab="flags">What needs checking</button>
+    </div>
+    <div class="card" style="margin:0"><div id="panel"></div></div>
+  </section>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+let RUN = null, DOC = null, DOCINDEX = 0, TAB = "values", POLL = null;
+
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+async function api(path, options) {
+  const response = await fetch(path, options);
+  if (!response.ok) {
+    let detail = response.statusText;
+    try { detail = (await response.json()).detail || detail; } catch (e) {}
+    throw new Error(detail);
+  }
+  return response.json();
+}
+
+function setStatus(text, bad) {
+  const node = $("#status");
+  node.textContent = text;
+  node.classList.toggle("err", !!bad);
+}
+
+function busy(on) {
+  $("#bar").hidden = !on;
+  for (const id of ["go", "goGolden", "goSamples"]) $("#" + id).disabled = on;
+}
+
+// -- health ---------------------------------------------------------------------------
+async function health() {
+  try {
+    const info = await api("/api/config");
+    $("#health").innerHTML =
+      `<span class="pill ${info.ocr.ok ? "ok" : "bad"}" title="${esc(info.ocr.detail)}">OCR</span>
+       <span class="pill ${info.llm.ok ? "ok" : "bad"}" title="${esc(info.llm.detail)}">${esc(info.model)}</span>
+       <span class="pill">${info.dpi} dpi</span>`;
+  } catch (e) {
+    $("#health").innerHTML = `<span class="pill bad">server unreachable</span>`;
+  }
+}
+
+// -- running --------------------------------------------------------------------------
+async function begin(start) {
+  busy(true);
+  $("#detail").hidden = true;
+  DOC = null;
+  try {
+    const run = await start();
+    RUN = run.id;
+    setStatus(`Started on ${run.file_names.length} file(s). This takes minutes per document.`);
+    if (POLL) clearInterval(POLL);
+    POLL = setInterval(poll, 2000);
+    poll();
+  } catch (e) {
+    busy(false);
+    setStatus(e.message, true);
+  }
+}
+
+async function poll() {
+  if (!RUN) return;
+  let run;
+  try { run = await api(`/api/runs/${RUN}`); }
+  catch (e) { clearInterval(POLL); busy(false); setStatus(e.message, true); return; }
+
+  setStatus(run.status === "running" ? `Working: ${run.stage}` :
+            run.status === "failed"  ? `Failed: ${run.error}` :
+            run.error ? run.error : "Done.",
+            run.status === "failed");
+
+  if (run.documents.length) showDocs(run.documents);
+
+  if (run.status !== "running") {
+    clearInterval(POLL);
+    busy(false);
+    $("#xlsx").disabled = !run.workbook;
+    if (run.documents.length && !DOC) openDoc(0);
+  }
+}
+
+function showDocs(documents) {
+  $("#docsCard").hidden = false;
+  $("#docs tbody").innerHTML = documents.map((d, i) => {
+    const read = Object.entries(d.sources || {})
+      .map(([kind, n]) => `<span class="tag ${kind === "paddle_ocr" ? "ocr" :
+                            kind === "text_layer" ? "text" : "none"}">${
+                            kind === "paddle_ocr" ? "OCR" :
+                            kind === "text_layer" ? "text layer" : "unreadable"} ${n}</span>`)
+      .join(" ");
+    return `<tr data-i="${i}" class="${i === DOCINDEX && DOC ? "sel" : ""}">
+      <td>${esc(d.file_name)}</td>
+      <td class="num">${d.page_count}</td>
+      <td>${read}</td>
+      <td class="num">${d.mean_conf == null ? "&mdash;" : d.mean_conf.toFixed(3)}</td>
+      <td class="num">${d.field_count}</td>
+      <td class="num">${d.charge_count}</td>
+      <td>${esc(d.signed_status || "")}</td>
+      <td>${d.flag_count ? `<span class="tag ${d.review_required ? "bad" : "warn"}">${d.flag_count}</span>` : ""}</td>
+    </tr>`;
+  }).join("");
+  $("#docs tbody").querySelectorAll("tr").forEach(tr =>
+    tr.onclick = () => openDoc(Number(tr.dataset.i)));
+}
+
+async function openDoc(index) {
+  DOCINDEX = index;
+  try { DOC = await api(`/api/runs/${RUN}/documents/${index}`); }
+  catch (e) { setStatus(e.message, true); return; }
+  $("#docs tbody").querySelectorAll("tr").forEach(tr =>
+    tr.classList.toggle("sel", Number(tr.dataset.i) === index));
+  $("#detail").hidden = false;
+  render();
+}
+
+// -- tabs -----------------------------------------------------------------------------
+document.querySelectorAll(".tabs button").forEach(button => button.onclick = () => {
+  document.querySelectorAll(".tabs button").forEach(b => b.classList.remove("on"));
+  button.classList.add("on");
+  TAB = button.dataset.tab;
+  render();
+});
+
+function render() {
+  if (!DOC) return;
+  $("#panel").innerHTML = TAB === "values" ? renderValues() : renderFlags();
+}
+
+// -- what was extracted ---------------------------------------------------------------
+function verdict(item) {
+  return item.status === "OK"
+    ? `<span class="tag ok">verified</span>`
+    : `<span class="tag bad">${esc(item.status.toLowerCase())}</span>`;
+}
+
+function renderValues() {
+  if (!DOC.fields.length && !DOC.charges.length) {
+    return `<div class="empty">Nothing was extracted. If the model was unavailable the
+            status line above says so; otherwise the pages may not have been readable.</div>`;
+  }
+  const fieldRows = DOC.fields.map(f => `<tr>
+    <td>${esc(f.field)}</td>
+    <td>${f.value == null || f.value === "" ? '<span class="quote">not stated</span>' : esc(f.value)}</td>
+    <td class="quote">${esc(f.evidence_text)}</td>
+    <td class="num">${f.page ?? ""}</td>
+    <td>${verdict(f)}</td></tr>`).join("");
+
+  const chargeRows = DOC.charges.map(c => {
+    const d = c.charge || {};
+    const money = v => (v == null || v === "") ? "" : esc(v);
+    return `<tr>
+      <td>${esc([d.product, d.sub_product].filter(Boolean).join(" &mdash; ")) ||
+            esc(c.field)}</td>
+      <td>${esc(d.resolved_basis_label || "")}</td>
+      <td class="num">${money(d.rate_inr)}</td>
+      <td class="num">${money(d.standard_rate_inr)}</td>
+      <td class="quote">${esc(c.evidence_text)}</td>
+      <td class="num">${c.page ?? ""}</td>
+      <td>${verdict(c)}</td></tr>`;
+  }).join("");
+
+  return `
+    <h3>Agreement fields &mdash; Summary sheet</h3>
+    ${DOC.fields.length ? `<table><thead><tr>
+      <th>Field</th><th style="width:22%">Value</th><th>Quoted from the document</th>
+      <th style="width:40px">Pg</th><th style="width:84px">Check</th>
+    </tr></thead><tbody>${fieldRows}</tbody></table>`
+    : `<div class="empty">No fields.</div>`}
+
+    <h3>Charge lines &mdash; Commercials sheet</h3>
+    ${DOC.charges.length ? `<table><thead><tr>
+      <th>Service</th><th style="width:13%">Basis</th>
+      <th style="width:11%">Client pays</th><th style="width:11%">Standard</th>
+      <th>Quoted from the document</th>
+      <th style="width:40px">Pg</th><th style="width:84px">Check</th>
+    </tr></thead><tbody>${chargeRows}</tbody></table>`
+    : `<div class="empty">No charge lines.</div>`}`;
+}
+
+// -- what needs checking ---------------------------------------------------------------
+function renderFlags() {
+  if (!DOC.findings.length) {
+    return `<div class="empty">Nothing flagged on this document.</div>`;
+  }
+  const order = { ERROR: 0, WARNING: 1, INFO: 2 };
+  const rows = [...DOC.findings]
+    .sort((a, b) => (order[a.severity] ?? 3) - (order[b.severity] ?? 3))
+    .map(f => `<tr>
+      <td><span class="tag ${f.severity === "ERROR" ? "bad" :
+                             f.severity === "WARNING" ? "warn" : ""}">${esc(f.severity)}</span></td>
+      <td>${esc(f.field)}</td><td>${esc(f.message)}</td></tr>`).join("");
+  return `<table><thead><tr>
+    <th style="width:84px">Severity</th><th style="width:28%">Field</th><th>What to check</th>
+  </tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+// -- wiring ----------------------------------------------------------------------------
+$("#go").onclick = () => {
+  const files = $("#files").files;
+  if (!files.length) { setStatus("Choose at least one PDF first.", true); return; }
+  const form = new FormData();
+  for (const file of files) form.append("files", file);
+  begin(() => api("/api/runs", { method: "POST", body: form }));
+};
+
+const folder = which => begin(() => api("/api/runs/folder", {
+  method: "POST", headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ folder: which }),
+}));
+$("#goGolden").onclick = () => folder("golden");
+$("#goSamples").onclick = () => folder("samples");
+
+$("#xlsx").onclick = () => { if (RUN) location.href = `/api/runs/${RUN}/excel`; };
+
+health();
+</script>
+</body>
+</html>

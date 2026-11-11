@@ -1,0 +1,20 @@
+# Runtime
+pymupdf>=1.28
+pdfplumber>=0.11
+pandas>=3.0
+openpyxl>=3.1
+python-dateutil>=2.9
+fastapi>=0.140
+uvicorn>=0.50
+python-multipart>=0.0.20
+
+# Tests
+pytest>=9.0
+httpx>=0.28
+
+# -- OCR, for scanned agreement pages ------------------------------------------------------
+# Required in practice: a probe of the real archive found 47 of 50 agreement pages carry no
+# text layer at all. See requirements-ocr.txt and the "Agreements" section of README.md.
+#
+# OCR cannot run on Python 3.14 -- PaddlePaddle publishes no 3.14 wheel -- so the agreement
+# pipeline runs on Python 3.13 in .venv313. The invoice pipeline runs on either.

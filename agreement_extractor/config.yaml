@@ -1,0 +1,140 @@
+# Agreement extraction pipeline -- all tunable values live here.
+#
+# Paths are resolved against the agreement_extractor/ folder unless absolute.
+
+paths:
+  input: sample_agreements         # folder of agreement PDFs, scanned recursively
+  cache: cache                     # one subfolder per stage, keyed by file SHA-256
+  output: output
+  page_images: cache/pages         # 200 DPI PNGs; every bbox in the run refers to these
+  golden: tests/golden
+
+render:
+  # Every bounding box the pipeline emits is in pixels on an image rendered at this DPI,
+  # origin top-left, [x0, y0, x1, y1]. Change it and previously cached boxes stop lining
+  # up, so the value is recorded in each page's JSON and checked on load.
+  dpi: 200
+  format: png
+
+text_layer:
+  # A page needs this many alphanumeric characters in its embedded text layer before it is
+  # treated as digital. Below it the page goes to OCR. Agreement pages are dense prose, so
+  # the bar is much higher than an invoice page's.
+  min_chars_per_page: 200
+  # Above this share of U+FFFD the text layer is considered broken regardless of length.
+  max_replacement_ratio: 0.1
+
+ocr:
+  lang: en
+  # Paddle 3.3.1's oneDNN backend fails EVERY inference call through the PIR executor
+  # ("ConvertPirAttribute2RuntimeAttribute not support"). It fails per page rather than at
+  # startup, so with it enabled the archive OCRs to nothing while appearing to run.
+  # This is applied as the FLAGS_use_mkldnn environment variable before paddle is imported,
+  # because PPStructureV3 -- unlike PaddleOCR -- has no enable_mkldnn parameter.
+  disable_onednn: true
+  # Meant for photographs taken at an angle. These documents are flatbed scans and PDF
+  # renders, already square, so both models only cost time per page.
+  use_doc_orientation_classify: false
+  use_doc_unwarping: false
+  use_textline_orientation: false
+  # PPStructureV3 sub-pipelines. Tables and seals are needed; formulas and charts are not
+  # and each one loads another model.
+  use_table_recognition: true
+  use_seal_recognition: true
+  use_formula_recognition: false
+  use_chart_recognition: false
+  # A page whose mean recognition confidence is below this is kept but flagged.
+  min_confidence: 0.80
+
+  # Table structure on scanned pages, via PP-StructureV3's wired-table models.
+  #
+  # Plain OCR reads a scanned table's characters perfectly and loses the grid, which is the
+  # part that says which column a number is in. The Aditya Birla MSA's Schedule II came back
+  # as 77 loose lines with the four columns interleaved, and no charge line could be read
+  # out of it. With this on, the same page returns a 4-column grid with its headers.
+  #
+  # It costs about 3 minutes a page here, against ~50 s for plain OCR, so it runs only on
+  # pages that look like a table of charges: short average line AND several mentions of
+  # money. On that MSA this picks pages 19 and 20 and leaves the other 18 alone.
+  table_recognition_on_scans: true
+  table_page_max_mean_line_chars: 45
+  table_page_min_money_mentions: 3
+
+llm:
+  # Qwen3 served locally. Nothing is sent to a cloud API.
+  endpoint: http://localhost:11434
+  model: qwen3:8b
+  # Determinism is a hard requirement: the same PDF must extract identically on a re-run.
+  temperature: 0.0
+  seed: 0
+  # Thinking mode defaults off for speed. Turn on only if it measurably beats the golden
+  # set, which eval.py is there to decide.
+  thinking: false
+  # The LARGEST context window the pipeline may ask for, not the one it always uses. Each
+  # call asks for the smallest of 8192 / 16384 / 32768 that fits its own prompt plus room
+  # to answer -- see llm_input.plan_window.
+  #
+  # Measured on this machine (qwen3:8b, 8 GB RTX 5060), generating 300 tokens:
+  #
+  #      num_ctx    tok/s
+  #         8192     30.8
+  #        16384     18.0
+  #        32768     10.8
+  #
+  # Nothing about the work changes between those rows. The KV cache for a 32k window will
+  # not fit beside the weights, so 41% of the model is evaluated on the CPU. A three-page
+  # offer letter asking for 32k was paying almost three times over for space it never used.
+  num_ctx: 32768
+  # The ceiling on one answer, and the only thing that stops a runaway. An MSA renders to a
+  # ~24k-token prompt; when Call B's answer then outgrew what was left of the 32k window,
+  # llama-server discarded 16,381 tokens -- the instructions and the document with them --
+  # and the model generated for an hour without ever reaching a stop token. Tokens were
+  # still arriving the whole time, so the streaming timeout never fired. 6000 is comfortably
+  # more than the longest honest answer seen here (Call B on the 4 golden letters peaks near
+  # 2,600) while leaving the window room to spare.
+  max_output_tokens: 6000
+  # The floor under that cap. An extraction is a summary, so the answer is always a
+  # fraction of the document; the cap is scaled with the prompt and this stops a very short
+  # document from being given too little room to finish a sentence in.
+  min_output_tokens: 1500
+  # Room kept for the instruction prompt that is prepended to the document body.
+  instruction_tokens: 2000
+  # Seconds of silence tolerated, not a cap on how long an answer may take: the reply is
+  # streamed, so this fires only when the server stops sending.
+  #
+  # It must still cover prompt processing. Nothing is sent while the server ingests the
+  # prompt, and a whole offer letter at num_ctx 32768, on a model only partly on the GPU,
+  # can take several minutes before the first token appears. At 300 the request was cut off
+  # mid-prefill and every retry died at the same point, which looks exactly like a hung
+  # server. 900 covers the slowest prefill seen here with room to spare; a server that is
+  # genuinely down refuses the connection immediately and never reaches this.
+  request_timeout_seconds: 900
+  max_retries: 3
+
+grounding:
+  # S5 matches the LLM's verbatim evidence quote against OCR/text-layer tokens. Exact
+  # normalised substring is tried first; this is the rapidfuzz partial-ratio floor for the
+  # fuzzy pass that follows.
+  fuzzy_threshold: 85
+  # Below this a field is marked UNGROUNDED and sent to the review queue rather than kept.
+  min_match_score: 85
+  # When the same value appears in several rows ("INR 12" twice), the copy on the same row
+  # as key_text wins: within this many pixels of the label's vertical centre, to its right.
+  same_row_tolerance_px: 20
+
+validation:
+  # Rate parsed from evidence_text must equal normalized_value within this much.
+  rate_tolerance: 0.001
+  review_on_confidence_below: 0.80
+
+run:
+  # Per-file isolation: one unreadable PDF must never stop a 1000-document run.
+  continue_on_error: true
+  ocr_workers: 2
+  llm_batch_size: 1
+  # Re-runs skip files whose every stage is already cached.
+  resume: true
+
+logging:
+  level: INFO
+  file: output/run.log

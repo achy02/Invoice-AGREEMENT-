@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Local configuration
+.env
+vendor_rules.json
+
+# Runtime logs name the documents that were processed
+logs/*
+!logs/.gitkeep
+
+# Invoice data and generated reports: never commit
+uploads/*
+!uploads/.gitkeep
+outputs/*
+!outputs/.gitkeep
+sample_invoices/*
+!sample_invoices/README.md
+
+# -- Agreement pipeline (self-contained; delete this block with the folder) -----------------
+agreement_extractor/sample_agreements/*
+!agreement_extractor/sample_agreements/README.md
+# Stage caches, rendered page images and run output are all derived
+agreement_extractor/cache/
+agreement_extractor/output/
+# The golden corpora are executed client contracts. The page renders, the QA
+# overlays and the hand-typed labels all carry counterparty names, negotiated
+# rates, GST and stamp-certificate numbers, so none of it leaves this machine.
+# Only the folder README travels, so a clone knows what belongs here.
+agreement_extractor/tests/golden/*
+!agreement_extractor/tests/golden/README.md
+agreement_extractor/tests/golden_msa/*
+!agreement_extractor/tests/golden_msa/README.md
+*.xlsx
+*.pdf
