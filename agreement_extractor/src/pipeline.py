@@ -346,9 +346,22 @@ def run_extraction(documents: list[Document], config: Config,
                     raise
                 results.append(result)
                 continue
-            cache.put(key, [_item_to_dict(i) for i in items])
-            run_log.add("S4", document.file_name, "OK", time.perf_counter() - started,
-                        f"{len(items)} field(s)")
+            if items:
+                cache.put(key, [_item_to_dict(i) for i in items])
+                run_log.add("S4", document.file_name, "OK", time.perf_counter() - started,
+                            f"{len(items)} field(s)")
+            else:
+                # Deliberately not cached. A document with readable pages that yields no
+                # field at all is a failed call, not an answer: the model timed out into an
+                # empty object, replied in the wrong shape, or drowned in a prompt too long
+                # for the window. Caching that would make the failure permanent *and*
+                # silent -- the next run would serve [] from disk in milliseconds, never
+                # call the model, and report "CACHED, 0 field(s)" as though it had checked.
+                # An empty result is the one answer always worth paying to recompute.
+                log.warning("S4 extracted nothing from %s; not caching, so the next run "
+                            "retries instead of inheriting the failure", document.file_name)
+                run_log.add("S4", document.file_name, "FAILED",
+                            time.perf_counter() - started, "0 field(s) -- not cached")
         else:
             items = [_item_from_dict(d) for d in raw]
             run_log.add("S4", document.file_name, "CACHED", detail=f"{len(items)} field(s)")
