@@ -1,12 +1,17 @@
-"""Score the pipeline against the hand-labelled MSA ground truth (101 charge lines).
+"""Score the pipeline against the hand-labelled MSA ground truth (82 charge lines).
 
 Separate from `eval.py` because an MSA is a different document to an offer letter and is
 graded differently. The offer-letter set asks "did you find this rate and is the number
-right". An MSA asks that too, but 55 of its 101 golden lines *have no number* --
+right". An MSA asks that too, but 26 of its 82 golden lines *have no number* --
 "Chargeable beyond free limit", "On reimbursement basis", "To be borne by Corporate/Bank",
-"Waived off", and seven services listed with no price anywhere. A row that reports a number
+"Waived off", and services listed with no price anywhere. A row that reports a number
 for those is wrong in a way the offer-letter set cannot express, so it is scored here as
 its own failure rather than quietly counted as a hit.
+
+The denominator was 101 until the two hand-extractions of these same four agreements were
+compared: the extra 19 rows were commercial terms and unpriced scope items rather than
+rates, so the pipeline was being charged for rows this sheet never asks it to produce.
+`scripts/build_golden_msa.py` rebuilds the file and records the reasoning.
 
 Matching is fuzzy on the charge head, because the ground truth is written by a person
 ("Stamp paper logistic charges") and the model copies the document ("Stamp Paper logistic
